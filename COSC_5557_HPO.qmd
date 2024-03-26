@@ -1,0 +1,527 @@
+---
+title: "COCS 5557: Practical Machine Learning"
+subtitle: "Pipeline Optimization"
+format:
+  pdf:
+    include-in-header: 
+      text: |
+        \usepackage{lscape}
+        \newcommand{\blandscape}{\begin{landscape}}
+        \newcommand{\elandscape}{\end{landscape}}
+jupyter: python3
+
+---
+
+
+
+
+**Introduction**
+
+Specifically, in this study, we aim to optimize the `hyperparameters` of various machine learning algorithms to achieve the best predictive performance on the `White Wine Quality` dataset. We will explore different algorithms and their `hyperparameter` configurations, aiming to find the optimal combination through `hyperparameter` optimization techniques. The primary goal is to demonstrate the effectiveness of `hyperparameter` tuning in improving model performance.
+
+
+**Hyperparameter Tuning**
+
+`Hyperparameters` are parameters whose values control the learning process and determine the values of model parameters that a learning algorithm ends up learning.
+
+A model `hyperparameter` is a configuration that is external to the model and whose value cannot be estimated from data. 
+
+`Hyperparameter tuning` consists of finding a set of optimal `hyperparameter` values for a learning algorithm while applying this optimized algorithm to any data set. That combination of `hyperparameters` maximizes the model’s performance, minimizing a predefined loss function to produce better results with fewer errors.
+
+`Hyperparameter tuning` is an essential part of machine learning.
+
+Optimizing hyperparameters is essential for improving model performance, preventing overfitting, enhancing generalization, and maximizing the effectiveness of machine learning algorithms in real-world applications. It is a critical step in the model development process that can lead to more accurate and reliable predictions.
+
+`Hyperparameters` are different from parameters, which are the internal coefficients or weights for a model found by the learning algorithm. Unlike parameters, `hyperparameters` are specified when implementing the model.
+
+Typically, it is challenging to know what values to use for the `hyperparameters` of a given algorithm on a given dataset, therefore it is common to use random or grid search strategies for different `hyperparameter` values.
+
+The more `hyperparameters` of an algorithm that need to be tuned, the slower the tuning process would be. Therefore, it is desirable to select a minimum subset of model `hyperparameters` to search or tune.
+
+Not all model `hyperparameters` are equally important. Some `hyperparameters` have an outsized effect on the behavior, and in turn, on the performance of a machine learning algorithm.
+
+It is important to know which `hyperparameters` to focus on to get a good result in a timely manner.
+
+In this Exercise, it will be discovered those `hyperparameters` that are most important for some selected machine learning classification algorithms.
+
+Here are the classification algorithms that would be explored
+
+1. Logistic Regression
+
+2. Decision Tree Clasifier
+
+3. Ridge Classifier
+
+4. Gradient Boosting Classifier
+
+5. Random Forest
+
+
+We will consider these algorithms in the context of their scikit-learn implementation (in Python). However, the same `hyperparameter` suggestions are usable in the context of other platforms like Weka and R, as well.
+
+ 
+**HPO Using Optuna**
+
+Optuna is a popular Python library for automating HPO tasks efficiently.
+
+Optuna uses an optimization engine to search for the best set of `hyperparameters` within a given search space. It employs various sampling algorithms such as `TPE` (`Tree-structured Parzen Estimator`) to explore the hyperparameter space effectively.
+
+*The following outlines a way to use Optuna for HPO:*
+
+1. *Define Objective Function:* One needs to define an objective function that evaluates the performance of the model using a set of hyperparameters. This function typically involves training the model with the given hyperparameters and computing a metric, like accuracy, loss, on a validation set.
+
+2. *Define Search Space:* One specifies the search space for each hyperparameter that Optuna will explore. One can define discrete choices, continuous ranges, or distributions for the hyperparameters.
+
+3. *Create Study:* Initializeing an Optuna study object, specifying the direction of optimization (maximize or minimize) and the sampling algorithm to use.
+
+4. *Run Optimization:* Optimize the objective function by calling the study.optimize() method. Optuna will execute multiple trials, each with a different set of hyperparameters, and update the study based on the performance of each trial.
+
+5. *Retrieve Best Hyperparameters:* Once the optimization is complete, one can retrieve the best set of hyperparameters found during the search using study.best_params and the corresponding best objective value using study.best_value.
+
+6. *Evaluate Model:* Evaluate the trained model on a holdout test set to assess its performance accurately.
+
+
+
+```{python}
+#| echo: false
+
+import sklearn
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.linear_model import RidgeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import optuna
+from optuna.samplers import TPESampler
+
+# Load the white wine quality dataset
+white_wine_data = pd.read_csv(r'C:\Users\Laptop\OneDrive\Desktop\winequality-white.csv', sep=r';')
+
+# Split the data into features and target
+X = white_wine_data.drop(columns=['quality'])
+y = white_wine_data['quality']
+
+# Split the data into train and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=True)
+
+# Data preprocessing
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+
+print("X_train shape:",X_train.shape)
+print("X_test shape:",X_test.shape)
+```
+
+
+```{python}
+#| echo: false
+#To store results of models, we create two dictionaries
+result_dict_HPO = {}
+result_dict_test = {}
+```
+
+
+
+**Logistic Regression**
+
+*Hyperparameter search space:*
+
+`C = trial.suggest_float("C", 0.1, 10)`
+
+`penalty = trial.suggest_categorical("penalty", ["l1", "l2"])`
+
+`solver='saga',  # saga’ are faster for large dataset`
+
+```{python}
+#| echo: false
+
+#Suppresses intermediate output
+optuna.logging.set_verbosity(optuna.logging.ERROR) 
+
+
+def objective(trial):
+    # Define hyperparameters to be optimized
+    C = trial.suggest_float("C", 0.1, 10)
+    penalty = trial.suggest_categorical("penalty", ["l1", "l2"])
+
+    # Initialize LogisticRegression with hyperparameters
+    clf = LogisticRegression(
+        C=C,
+        penalty=penalty,
+        solver='saga',  # saga’ are faster for large dataset
+        random_state=42
+    )
+
+    # Evaluate the model using cross-validation
+    score = cross_val_score(clf, X_train_scaled, y_train, cv=5, n_jobs=-1)
+    accuracy = score.mean()
+    return accuracy
+
+# Define Optuna study and sampler
+sampler = TPESampler(seed=42)
+study = optuna.create_study(direction="maximize", sampler=sampler)
+study.optimize(objective, n_trials=100)
+
+# Get the best hyperparameters
+best_params = study.best_params
+best_score = study.best_value
+print("Best Score:", best_score)
+print("Best Hyperparameters:")
+print(best_params)
+
+
+# Reshapes y_train into a 1D array
+
+import numpy as np
+
+y_train = np.ravel(y_train)
+
+# Scale the input features
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.fit_transform(X_test)
+
+
+from sklearn.linear_model import LogisticRegression
+
+model1 = LogisticRegression(max_iter=1000)
+
+model1.fit(X_train,y_train)
+model1.score(X_test,y_test)
+
+#Store results in the dictionaries
+result_dict_HPO["Logistic Score w/ HPO"] = best_score
+result_dict_test["Logistic Score w/o HPO"] = model1.score(X_test,y_test)
+
+
+```
+
+
+**Decision Tree Classifier**
+
+*Hyperparameter search space:*
+
+`criterion = trial.suggest_categorical("criterion", ["gini", "entropy"])`
+    
+`max_depth = trial.suggest_int("max_depth", 3, 15)`
+    
+`min_samples_split = trial.suggest_int("min_samples_split", 2, 20)`
+    
+`min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 10)`
+
+
+```{python}
+#| echo: false
+
+
+
+def objective(trial):
+    # Define hyperparameters to be optimized
+    criterion = trial.suggest_categorical("criterion", ["gini", "entropy"])
+    max_depth = trial.suggest_int("max_depth", 3, 15)
+    min_samples_split = trial.suggest_int("min_samples_split", 2, 20)
+    min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 10)
+
+    # Initialize DecisionTreeClassifier with hyperparameters
+    clf = DecisionTreeClassifier(
+        criterion=criterion,
+        max_depth=max_depth,
+        min_samples_split=min_samples_split,
+        min_samples_leaf=min_samples_leaf,
+        random_state=42
+    )
+
+    # Evaluate the model using cross-validation
+    score = cross_val_score(clf, X_train_scaled, y_train, cv=5, n_jobs=-1)
+    accuracy = score.mean()
+    return accuracy
+
+# Define Optuna study and sampler
+sampler = TPESampler(seed=42)
+study = optuna.create_study(direction="maximize", sampler=sampler)
+study.optimize(objective, n_trials=100)
+
+# Get the best hyperparameters
+best_params = study.best_params
+best_score = study.best_value
+print("Best Score:", best_score)
+print("Best Hyperparameters:")
+print(best_params)
+
+# define model
+model2 = DecisionTreeClassifier()
+
+
+model2.fit(X_train,y_train)
+model2.score(X_test,y_test)
+
+
+#Store results in the dictionaries
+result_dict_HPO["Decision Tree Score w/ HPO"] = best_score
+result_dict_test["Decision Tree Score w/o HPO"] = model2.score(X_test,y_test)
+
+```
+
+
+**Ridge Classifier**
+
+*Hyperparameter search space:*
+
+`alpha = trial.suggest_float('alpha', 0.01, 10.0)`
+
+
+```{python}
+#| echo: false
+
+
+def objective(trial):
+    # Define hyperparameters to be optimized
+    alpha = trial.suggest_float('alpha', 0.01, 10.0)
+    
+    # Initialize Ridge classifier with hyperparameters
+    clf = RidgeClassifier(alpha=alpha, random_state=42)
+    
+    # Evaluate the model using cross-validation
+    score = cross_val_score(clf, X_train_scaled, y_train, cv=5, n_jobs=-1)
+    accuracy = score.mean()
+    return accuracy
+
+# Define Optuna study and sampler
+sampler = TPESampler(seed=42)
+study = optuna.create_study(direction="maximize", sampler=sampler)
+study.optimize(objective, n_trials=100)
+
+# Get the best hyperparameters
+best_params = study.best_params
+best_score = study.best_value
+print("Best Score:", best_score)
+print("Best Hyperparameters:")
+print(best_params)
+
+# define model
+model3 = RidgeClassifier()
+
+
+model3.fit(X_train,y_train)
+model3.score(X_test,y_test)
+
+
+#Store results in the dictionaries
+result_dict_HPO["Ridge Classifier Score w/ HPO"] = best_score
+result_dict_test["Ridge Classifier Score w/o HPO"] = model3.score(X_test,y_test)
+```
+
+
+
+
+
+**Gradient Boosting Classifier**
+
+*Hyperparameter search space:*
+
+`n_estimators = trial.suggest_int('n_estimators', 10, 100)`
+
+`learning_rate = trial.suggest_float('learning_rate', 0.001, 0.1)`
+
+`max_depth = trial.suggest_int('max_depth', 1, 10)`
+    
+`min_samples_split = trial.suggest_int('min_samples_split', 2, 20)`
+    
+`min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)`
+
+
+```{python}
+#| echo: false
+
+def objective(trial):
+    # Define hyperparameters to be optimized
+    n_estimators = trial.suggest_int('n_estimators', 10, 100)
+    learning_rate = trial.suggest_float('learning_rate', 0.001, 0.1)
+    max_depth = trial.suggest_int('max_depth', 1, 10)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)
+    
+    # Initialize Gradient Boosting classifier with hyperparameters
+    clf = GradientBoostingClassifier(n_estimators=n_estimators, 
+                                     learning_rate=learning_rate, 
+                                     max_depth=max_depth, 
+                                     min_samples_split=min_samples_split, 
+                                     min_samples_leaf=min_samples_leaf, 
+                                     random_state=42)
+    
+    # Evaluate the model using cross-validation
+    score = cross_val_score(clf, X_train_scaled, y_train, cv=5, n_jobs=-1)
+    accuracy = score.mean()
+    return accuracy
+
+# Define Optuna study and sampler
+sampler = TPESampler(seed=42)
+study = optuna.create_study(direction="maximize", sampler=sampler)
+study.optimize(objective, n_trials=100)
+
+# Get the best hyperparameters
+best_params = study.best_params
+best_score = study.best_value
+print("Best Score:", best_score)
+print("Best Hyperparameters:")
+print(best_params)
+
+
+model4 = GradientBoostingClassifier()
+
+model4.fit(X_train,y_train)
+model4.score(X_test,y_test)
+
+
+#Store results in the dictionaries
+result_dict_HPO["Gradient Boosting Score w/ HPO"] = best_score
+result_dict_test["Gradient Boosting Score w/o HPO"] = model4.score(X_test,y_test) 
+
+```
+
+
+
+
+
+**Random Forest Classifier**
+
+*Hyperparameter search space:*
+
+`n_estimators = trial.suggest_int('n_estimators', 10, 100)`
+
+`max_depth = trial.suggest_int('max_depth', 1, 32)`
+
+`min_samples_split = trial.suggest_int('min_samples_split', 2, 20)`
+
+`min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)`
+
+
+```{python}
+#| echo: false
+
+def objective(trial):
+    # Define hyperparameters to be optimized
+    n_estimators = trial.suggest_int('n_estimators', 10, 100)
+    max_depth = trial.suggest_int('max_depth', 1, 32)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 10)
+    
+    # Initialize Random Forest classifier with hyperparameters
+    clf = RandomForestClassifier(n_estimators=n_estimators, 
+                                 max_depth=max_depth, 
+                                 min_samples_split=min_samples_split, 
+                                 min_samples_leaf=min_samples_leaf, 
+                                 random_state=42)
+    
+    # Evaluate the model using cross-validation
+    score = cross_val_score(clf, X_train_scaled, y_train, cv=5, n_jobs=-1)
+    accuracy = score.mean()
+    return accuracy
+
+# Define Optuna study and sampler
+sampler = TPESampler(seed=42)
+study = optuna.create_study(direction="maximize", sampler=sampler)
+study.optimize(objective, n_trials=100)
+
+# Get the best hyperparameters
+best_params = study.best_params
+best_score = study.best_value
+print("Best Score:", best_score)
+print("Best Hyperparameters:")
+print(best_params)
+
+
+model5 = RandomForestClassifier()
+
+model5.fit(X_train,y_train)
+model5.score(X_test,y_test)
+
+
+#Store results in the dictionaries
+result_dict_HPO["Random Forest Score w/ HPO"] = best_score
+result_dict_test["random Forest Score w/o HPO"] = model5.score(X_test,y_test) 
+
+
+
+```
+
+
+
+
+```{python}
+#| echo: false
+
+df_result_HPO = pd.DataFrame.from_dict(result_dict_HPO,orient = "index", columns=["Score"])
+df_result_HPO
+
+```
+
+
+```{python}
+#| echo: false
+
+df_result_test = pd.DataFrame.from_dict(result_dict_test,orient = "index",columns=["Score"])
+df_result_test
+```
+
+
+
+**Visualizing the scores**
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Define custom color palette
+colors = ["navy", "maroon", "darkgreen", "dimgrey", "blue"]
+
+
+fig, ax = plt.subplots(1, 2, figsize=(35, 30))
+
+# Plot for training data set
+sns.barplot(x=df_result_HPO.index, y=df_result_HPO.Score, ax=ax[0], palette=colors, hue=df_result_test.index, legend=False)
+
+# Plot for test data set
+sns.barplot(x=df_result_test.index, y=df_result_test.Score, ax=ax[1], palette=colors, hue=df_result_test.index, legend=False)
+
+# Set ticks and labels with rotation
+ax[0].set_xticks(range(len(df_result_HPO.index)))
+ax[0].set_xticklabels(df_result_HPO.index, rotation=45, ha='right', fontsize=20)
+ax[1].set_xticks(range(len(df_result_test.index)))
+ax[1].set_xticklabels(df_result_test.index, rotation=45, ha='right', fontsize=20)
+
+
+ax[0].set_xlabel('ML Algorithm w/ HPO Score', fontsize=20) 
+ax[0].set_ylabel('Score', fontsize=20)  
+ax[1].set_xlabel('ML Algorithm w/o HPO Score', fontsize=20)  
+ax[1].set_ylabel('Score', fontsize=20)  
+
+# Increases the size of y-axis markings
+ax[0].tick_params(axis='y', labelsize=20) 
+ax[1].tick_params(axis='y', labelsize=20)  
+
+
+plt.show()
+
+```
+
+
+**Conclusion**
+
+After tuning the `hyperparameters`, Gradient Boosting Classifier algorithm is the most improved machine learning algorithm with  `{'n_estimators': 44, 'learning_rate': 0.09835913029153578, 'max_depth': 10, 'min_samples_split': 3, 'min_samples_leaf': 7}` `hyperparameters` combination, for predicting the white wine `quality`. Although, the Random Forest algorithm didn't improve, it is still the best algorithm. And I wouldn't recommend tuning its `hyperpaameters`, since it performs better before tuning than after tuning.
+
+
+**Code**
+
+The code used for this Exerecise will be provided in a separate Quarto Document file for reproducibility.
