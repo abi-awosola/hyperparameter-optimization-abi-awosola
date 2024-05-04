@@ -1,0 +1,390 @@
+---
+title: "COCS 5557: Practical Machine Learning"
+subtitle: "Hyperparammeter Optimization"
+format:
+  pdf:
+    include-in-header: 
+      text: |
+        \usepackage{lscape}
+        \newcommand{\blandscape}{\begin{landscape}}
+        \newcommand{\elandscape}{\end{landscape}}
+jupyter: python3
+
+geometry: "bottom=30mm"
+---
+
+
+**Introduction**
+
+In this study, we aim to optimize the `hyperparameters` of various machine learning algorithms to achieve the best predictive performance on the `White Wine Quality` dataset. We will explore different algorithms and their `hyperparameter` configurations, aiming to find the optimal combination through `hyperparameter` optimization techniques. The primary goal is to demonstrate the effectiveness of `hyperparameter` tuning in improving model performance.
+
+
+
+
+**Optuna with Nested Resampling**
+
+Nested resampling, when used with Optuna, involves conducting `hyperparameter` optimization within each fold of an outer cross-validation loop.
+
+
+**Nested Resampling Framework:**
+
+**1. Outer Cross-Validation (Model Evaluation):**
+
+   - The outer loop, implemented using 5-fold cross-validation, divides the dataset into 5 non-overlapping folds.\
+   - During each iteration of the outer loop, one fold is held out as the test set, while the remaining folds are joined to form the training set.\
+   - The model is trained on the training set and subsequently evaluated on the corresponding test set, yielding a performance accuracy for each fold.
+
+**2. Inner Cross-Validation (Hyperparameter Tuning):**
+
+   - Nested within the outer loop, the inner loop facilitates hyperparameter tuning through an additional layer of cross-validation.\
+   - Similar to the outer loop, the inner loop partitions the training set into 5 folds for cross-validation.\
+   - Within each iteration of the inner loop, one fold serves as the validation set, while the remaining folds are utilized for training the model with the classifier hyperparameter configurations.\
+   - The model's hyperparameters are tuned using the Optuna library, optimizing mean cross-validated accuracy.\
+   - After hyperparameter tuning, the model's performance is assessed on the validation fold, generating a hyperparameter-nested CV accuracy.
+
+**3. Aggregation and Evaluation:**
+
+   - Across all iterations of the outer loop, the hyperparameters yielding the best performance on the inner validation sets are retained.\
+   - Ultimately, the model's performance is aggregated over all outer fold iterations, providing an unbiased estimate of its generalization performance.
+
+
+
+
+**Logistic Regression**
+
+```{python}
+#| echo: false
+
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+import optuna
+import matplotlib.pyplot as plt
+import seaborn as sns
+import textwrap
+
+# Suppress intermediate output
+optuna.logging.set_verbosity(optuna.logging.ERROR)
+
+# Load the white wine quality dataset
+white_wine_data = pd.read_csv(r'C:\\Users\\Laptop\\OneDrive\\Desktop\\winequality-white.csv', sep=r';')
+
+# Split the data into features and target
+X = white_wine_data.drop(columns=['quality'])
+y = white_wine_data['quality']
+
+# Reshape y into a 1D array
+y = np.ravel(y)
+
+# Data preprocessing
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+# Define the objective function for Optuna
+def objective(trial):
+    # Define hyperparameters to be optimized
+    C = trial.suggest_float('C', 0.1, 10, log=True)
+    penalty = trial.suggest_categorical('penalty', ['l1', 'l2'])
+    
+    # Initialize LogisticRegression with hyperparameters
+    clf = LogisticRegression(C=C, penalty=penalty, solver='liblinear', random_state=42)
+    
+    # Inner cross-validation
+    cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+    return cv_scores.mean()
+
+# Create Optuna study
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=100)
+
+# Performance before HPO
+clf = LogisticRegression(random_state=42, max_iter=1000)
+initial_cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+print("Initial CV Accuracy (LogisticRegression):", textwrap.fill(str(initial_cv_scores.mean()), width=80))
+
+# Initialize 5-fold outer cross-validation
+outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+# Perform nested cross-validation and print the mean and standard deviation of the scores
+nested_scores = cross_val_score(LogisticRegression(C=study.best_trial.params['C'], penalty=study.best_trial.params['penalty'], solver='liblinear', random_state=42), X=X_scaled, y=y, cv=outer_cv)
+print("Nested CV Accuracy (LogisticRegression):", textwrap.fill(str(nested_scores.mean()), width=80))
+
+# Convert Optuna study results to DataFrame
+trial_df = study.trials_dataframe()
+
+# Plotting results
+plt.figure(figsize=(12, 6))
+
+# Line plot for C vs. accuracy
+sns.lineplot(data=trial_df,
+             x='params_C',
+             y='value',
+             hue='params_penalty',
+             marker='o')
+
+# Set labels and title
+plt.xlabel('C (Regularization strength)')
+plt.ylabel('Accuracy')
+plt.title('Accuracy vs. C for Logistic Regression')
+
+# Display legend
+plt.legend(title='Penalty')
+
+plt.grid(True)
+plt.tight_layout()
+
+# Save plot to a file
+plt.savefig('accuracy_vs_C_logistic.png')
+
+# Display plot
+plt.show()
+
+
+```
+
+**Decision Tree Classifier**
+
+*Hyperparameter search space:*
+
+`criterion = trial.suggest_categorical("criterion", ["gini", "entropy"])`
+    
+`max_depth = trial.suggest_int("max_depth", 3, 15)`
+    
+`min_samples_split = trial.suggest_int("min_samples_split", 2, 20)`
+    
+`min_samples_leaf = trial.suggest_int("min_samples_leaf", 1, 10)`
+
+
+```{python}
+#| echo: false
+
+
+
+
+
+from sklearn.tree import DecisionTreeClassifier
+
+
+
+
+
+# Define the objective function for Optuna
+def objective(trial):
+    # Define hyperparameters to be optimized
+    max_depth = trial.suggest_int('max_depth', 1, 32)
+    min_samples_split = trial.suggest_int('min_samples_split', 2, 20)
+    min_samples_leaf = trial.suggest_int('min_samples_leaf', 1, 20)
+    
+    # Initialize DecisionTreeClassifier with hyperparameters
+    clf = DecisionTreeClassifier(max_depth=max_depth, min_samples_split=min_samples_split, min_samples_leaf=min_samples_leaf, random_state=42)
+    
+    # Inner cross-validation
+    cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+    return cv_scores.mean()
+
+# Create Optuna study
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=100)
+
+# Performance before HPO
+clf = DecisionTreeClassifier(random_state=42)
+initial_cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+print("Initial CV Accuracy (Decision Tree):", textwrap.fill(str(initial_cv_scores.mean()), width=80))
+
+# Initialize 5-fold outer cross-validation
+outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+# Perform nested cross-validation and print the mean and standard deviation of the scores
+nested_scores = cross_val_score(DecisionTreeClassifier(max_depth=study.best_trial.params['max_depth'], min_samples_split=study.best_trial.params['min_samples_split'], min_samples_leaf=study.best_trial.params['min_samples_leaf'], random_state=42), X=X_scaled, y=y, cv=outer_cv)
+print("Nested CV Accuracy (Decision Tree):", textwrap.fill(str(nested_scores.mean()), width=80))
+
+# Convert Optuna study results to DataFrame
+trial_df = study.trials_dataframe()
+
+# Plotting results
+plt.figure(figsize=(12, 6))
+
+# Line plot for max_depth vs. accuracy
+sns.lineplot(data=trial_df,
+             x='params_max_depth',
+             y='value',
+             hue='params_min_samples_split',
+             style='params_min_samples_leaf',
+             markers=True)
+
+# Set labels and title
+plt.xlabel('Max Depth')
+plt.ylabel('Accuracy')
+plt.title('Accuracy vs. Max Depth for Decision Tree Classifier')
+
+# Display legend
+plt.legend(title='Min Samples Split', loc='lower right')
+
+plt.grid(True)
+plt.tight_layout()
+
+# Save plot to a file
+plt.savefig('accuracy_vs_max_depth_decision_tree.png')
+
+# Display plot
+plt.show()
+
+```
+
+
+**Ridge Classifier**
+
+*Hyperparameter search space:*
+
+`alpha = trial.suggest_float('alpha', 0.1, 100, log=True)`
+
+`solver = trial.suggest_categorical('solver', ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'])`
+
+```{python}
+#| echo: false
+
+
+
+from sklearn.linear_model import RidgeClassifier
+
+# Define the objective function for Optuna
+def objective(trial):
+    # Define hyperparameters to be optimized
+    alpha = trial.suggest_float('alpha', 0.1, 100, log=True)
+    solver = trial.suggest_categorical('solver', ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'])
+    
+    # Initialize RidgeClassifier with hyperparameters
+    clf = RidgeClassifier(alpha=alpha, solver=solver, random_state=42)
+    
+    # Inner cross-validation
+    cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+    return cv_scores.mean()
+
+# Create Optuna study
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=100)
+
+# Performance before HPO
+clf = RidgeClassifier(random_state=42)
+initial_cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+print("Initial CV Accuracy (Ridge Classifier):", textwrap.fill(str(initial_cv_scores.mean()), width=80))
+
+# Initialize 5-fold outer cross-validation
+outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+# Perform nested cross-validation and print the mean and standard deviation of the scores
+nested_scores = cross_val_score(RidgeClassifier(alpha=study.best_trial.params['alpha'], solver=study.best_trial.params['solver'], random_state=42), X=X_scaled, y=y, cv=outer_cv)
+print("Nested CV Accuracy (Ridge Classifier):", textwrap.fill(str(nested_scores.mean()), width=80))
+
+# Convert Optuna study results to DataFrame
+trial_df = study.trials_dataframe()
+
+# Plotting results
+plt.figure(figsize=(12, 6))
+
+# Line plot for alpha vs. accuracy
+sns.lineplot(data=trial_df,
+             x='params_alpha',
+             y='value',
+             hue='params_solver',
+             marker='o')
+
+# Set labels and title
+plt.xlabel('Alpha (Regularization strength)')
+plt.ylabel('Accuracy')
+plt.title('Accuracy vs. Alpha (Regularization strength) for Ridge Classifier')
+
+plt.grid(True)
+plt.tight_layout()
+
+# Save plot to a file
+plt.savefig('accuracy_vs_alpha_ridge_classifier.png')
+
+# Display plot
+plt.show()
+
+```
+
+**Random Forest Classifier**
+
+*Hyperparameter search space:*
+
+`n_estimators = trial.suggest_int('n_estimators', 50, 500)`
+
+`max_depth = trial.suggest_int('max_depth', 2, 32, log=True)`
+
+
+```{python}
+#| echo: false
+
+from sklearn.ensemble import RandomForestClassifier
+
+# Define the objective function for Optuna
+def objective(trial):
+    # Define hyperparameters to be optimized
+    n_estimators = trial.suggest_int('n_estimators', 50, 500)
+    max_depth = trial.suggest_int('max_depth', 2, 32, log=True)
+    
+    # Initialize RandomForestClassifier with hyperparameters
+    clf = RandomForestClassifier(n_estimators=n_estimators,
+                                 max_depth=max_depth,
+                                 random_state=42)
+    
+    # Inner cross-validation
+    cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+    return cv_scores.mean()
+
+# Create Optuna study
+study = optuna.create_study(direction='maximize')
+study.optimize(objective, n_trials=100)
+
+# Performance before HPO
+clf = RandomForestClassifier(random_state=42)
+initial_cv_scores = cross_val_score(clf, X_scaled, y, cv=5)
+print("Initial CV Accuracy (Random Forest Classifier):", textwrap.fill(str(initial_cv_scores.mean()), width=80))
+
+# Initialize 5-fold outer cross-validation
+outer_cv = KFold(n_splits=5, shuffle=True, random_state=42)
+
+# Perform nested cross-validation and print the mean and standard deviation of the scores
+nested_scores = cross_val_score(RandomForestClassifier(n_estimators=study.best_trial.params['n_estimators'],
+                                                       max_depth=study.best_trial.params['max_depth'],
+                                                       random_state=42),
+                                X=X_scaled, y=y, cv=outer_cv)
+print("Nested CV Accuracy (Random Forest Classifier):", textwrap.fill(str(nested_scores.mean()), width=80))
+
+# Convert Optuna study results to DataFrame
+trial_df = study.trials_dataframe()
+
+# Plotting results
+plt.figure(figsize=(12, 6))
+
+# Line plot for n_estimators vs. accuracy
+sns.lineplot(data=trial_df,
+             x='params_n_estimators',
+             y='value',
+             hue='params_max_depth',
+             marker='o')
+
+# Set labels and title
+plt.xlabel('Number of Estimators')
+plt.ylabel('Accuracy')
+plt.title('Accuracy vs. Number of Estimators for Random Forest Classifier')
+
+plt.grid(True)
+plt.tight_layout()
+
+# Save plot to a file
+plt.savefig('accuracy_vs_n_estimators_random_forest.png')
+
+# Display plot
+plt.show()
+
+
+```
+
+
+
+
